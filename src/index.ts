@@ -9,6 +9,15 @@ const main = async () => {
     const config = await initConfig();
     const logger = await initLogging(config);
     const app = await initApp(config, logger);
+
+      // Якщо app = express() – тоді ок:
+  app.get("/", (_req: Request, res: Response) => {
+    res.status(200).send("OK");
+  });
+
+  app.get("/health", (_req: Request, res: Response) => {
+    res.status(200).json({ status: "ok" });
+  });
     const server = createServer(app.requestListener)
         .listen(config.port, () => logger.info(`HTTP server listening on port ${config.port}`));
 
@@ -27,13 +36,5 @@ const main = async () => {
         },
     });
 }
-
-app.get("/", (req, res) => {
-  res.status(200).send("OK");
-});
-
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
-});
 
 main();
