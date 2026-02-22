@@ -4,6 +4,8 @@ import gracefulShutdown from "http-graceful-shutdown";
 import { initApp } from "./app";
 import { Env, initConfig } from "./config";
 import { initLogging } from "./logging";
+import { Client as PgClient } from "pg";
+import { createClient as createRedisClient } from "redis";
 
 const main = async () => {
   const config = await initConfig();
@@ -14,6 +16,13 @@ const main = async () => {
   const requestListener = (req: IncomingMessage, res: ServerResponse) => {
     // Врахуй, що url може містити query (?a=b)
     const url = req.url?.split("?")[0] ?? "";
+
+  const pg = new PgClient({ connectionString: process.env.DATABASE_URL });
+    await pg.connect();
+
+  const redis = createRedisClient({ url: process.env.REDIS_URL });
+    redis.on("error", (err) => logger.error({ err }, "Redis client error"));
+    await redis.connect();  
 
     if (req.method === "GET" && url === "/") {
       res.statusCode = 200;
@@ -28,7 +37,33 @@ const main = async () => {
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
+    if (req.method === "GET" && url === "/db") {
+  try {
+    await pg.query("SELECT 1 AS ok");
+    res.statusCode = 200;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ db: "ok" }));
+  } catch (err) {
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ db: "fail" }));
+  }
+  return;
+}
 
+if (req.method === "GET" && url === "/redis") {
+  try {
+    const pong = await redis.ping();
+    res.statusCode = pong === "PONG" ? 200 : 500;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ redis: pong }));
+  } catch (err) {
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ redis: "fail" }));
+  }
+  return;
+}
     // все інше віддаємо основному app
     return app.requestListener(req, res);
   };
@@ -46,7 +81,10 @@ const main = async () => {
     onShutdown: async () => {
       await app.shutdown();
       await otlpShutdown();
+      await redis.quit().catch(() => {});
+      await pg.end().catch(() => {});
     },
+    
     finally: () => {
       logger.info("Shutdown complete");
     },
